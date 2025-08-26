@@ -1,0 +1,18 @@
+def google_search(query):
+try:
+response = requests.get(url)
+# Check if request was successful
+if response.status_code == 200:
+data = response.json()
+# Extract useful search results
+if "items" in data:
+results = [(item["title"], item["link"]) for item in data["items"]]
+return results
+else:
+return "No results found."
+elif response.status_code == 403:
+return "Error: Quota exceeded or invalid API key."
+else:
+return f"Error: {response.status_code} - {response.text}"
+except requests.RequestException as e:
+return f"Request failed: {e}"
