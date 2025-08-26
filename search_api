@@ -1,0 +1,9 @@
+# Python
+import requests
+import os
+# Load API key and Search Engine ID securely
+API_KEY = os.getenv("GOOGLE_API_KEY") # Store API key as an environment variable
+SEARCH_ENGINE_ID = os.getenv("GOOGLE_CSE_ID") # Store Custom Search Engine ID
+# Define the search: Check the Google Search API for URLs that include the words “admin login”
+query = "inurl:admin login"
+url = f"https://www.googleapis.com/customsearch/v1?q={query}&key={API_KEY}&cx={SEARCH_ENGINE_ID}"
