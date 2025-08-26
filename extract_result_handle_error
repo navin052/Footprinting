@@ -1,18 +1,61 @@
-def google_search(query):
-try:
-response = requests.get(url)
-# Check if request was successful
-if response.status_code == 200:
-data = response.json()
-# Extract useful search results
-if "items" in data:
-results = [(item["title"], item["link"]) for item in data["items"]]
-return results
-else:
-return "No results found."
-elif response.status_code == 403:
-return "Error: Quota exceeded or invalid API key."
-else:
-return f"Error: {response.status_code} - {response.text}"
-except requests.RequestException as e:
-return f"Request failed: {e}"
+import os
+import requests
+
+API_KEY = os.getenv("GOOGLE_API_KEY")
+CSE_ID  = os.getenv("GOOGLE_CSE_ID")
+
+def google_search(query, api_key=API_KEY, cse_id=CSE_ID, max_results=10):
+    """
+    Perform a Google Custom Search and return a list of (title, link) tuples.
+    max_results: 1..100 (API allows 10 per request; we paginate with 'start')
+    """
+    if not api_key or not cse_id:
+        raise ValueError("Missing GOOGLE_API_KEY or GOOGLE_CSE_ID environment variables.")
+
+    endpoint = "https://www.googleapis.com/customsearch/v1"
+    results = []
+    fetched = 0
+    start = 1  # Google CSE uses 1-based indexing
+
+    while fetched < max_results:
+        to_get = min(10, max_results - fetched)
+        params = {
+            "q": query,
+            "key": api_key,
+            "cx": cse_id,
+            "num": to_get,
+            "start": start
+        }
+
+        try:
+            resp = requests.get(endpoint, params=params, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("items", [])
+                results.extend((it.get("title", ""), it.get("link", "")) for it in items)
+                fetched += len(items)
+
+                # If fewer than requested returned, no more pages
+                if len(items) < to_get:
+                    break
+
+                start += len(items)  # next page
+            elif resp.status_code == 403:
+                # Quota exceeded or invalid API key / CSE settings
+                raise RuntimeError("403 from Google CSE: quota exceeded or invalid credentials/config.")
+            else:
+                # Bubble up other errors with details
+                raise RuntimeError(f"Error {resp.status_code}: {resp.text[:200]}")
+        except requests.RequestException as e:
+            raise RuntimeError(f"Request failed: {e}") from e
+
+    return results
+
+if __name__ == "__main__":
+    # Example usage
+    hits = google_search('inurl:"admin login"', max_results=20)
+    if not hits:
+        print("No results found.")
+    else:
+        for title, link in hits:
+            print(f"{title}\n{link}\n")
