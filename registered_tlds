@@ -1,15 +1,91 @@
 # Python
+# pip install python-whois
 import whois
 import socket
-domains = ["example.com", "example.net", "example.org", "example.io", "example.ai"]
-for domain in domains:
-try:
-w = whois.whois(domain)
-# Some WHOIS queries return None, so handle missing data
-registered = bool(w.domain_name) if w.domain_name else False
-print(f"{domain} - Registered: {registered}")
-except whois.parser.PywhoisError: # WHOIS data not found (domain available or restricted)
-print(f"{domain} - Available or WHOIS restricted")
-except socket.timeout: # Handle network timeouts
-print(f"{domain} - WHOIS request timed out")
-except Exception as e: # Catch unex
+from datetime import datetime
+
+def _as_str(value):
+    """WHOIS fields can be scalar or list; return first item as string."""
+    if isinstance(value, list) and value:
+        return str(value[0])
+    return str(value) if value is not None else ""
+
+def _as_date(value):
+    """WHOIS dates can be list/datetime/str; normalize to YYYY-MM-DD."""
+    if isinstance(value, list) and value:
+        value = value[0]
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    # Some registries return strings; best-effort parse
+    try:
+        return str(value)[:10] if value else ""
+    except Exception:
+        return ""
+
+def is_registered(w):
+    """Infer registration status from typical WHOIS fields."""
+    dn = w.domain_name
+    if isinstance(dn, list):
+        dn = dn[0]
+    return bool(dn)
+
+def check_domains(domains, timeout=10):
+    results = []
+    for domain in domains:
+        try:
+            w = whois.whois(domain, timeout=timeout)
+            registered = is_registered(w)
+
+            results.append({
+                "domain": domain,
+                "registered": registered,
+                "registrar": _as_str(w.registrar),
+                "creation_date": _as_date(w.creation_date),
+                "expiration_date": _as_date(w.expiration_date),
+                "status": "OK"
+            })
+
+        except whois.parser.PywhoisError as e:
+            # Often means: not found / available / registry blocks WHOIS
+            results.append({
+                "domain": domain,
+                "registered": False,
+                "registrar": "",
+                "creation_date": "",
+                "expiration_date": "",
+                "status": f"WHOIS error (likely available/restricted): {e}"
+            })
+        except socket.timeout:
+            results.append({
+                "domain": domain,
+                "registered": None,
+                "registrar": "",
+                "creation_date": "",
+                "expiration_date": "",
+                "status": "WHOIS request timed out"
+            })
+        except Exception as e:
+            results.append({
+                "domain": domain,
+                "registered": None,
+                "registrar": "",
+                "creation_date": "",
+                "expiration_date": "",
+                "status": f"Unexpected error: {e.__class__.__name__}: {e}"
+            })
+    return results
+
+if __name__ == "__main__":
+    domains = ["example.com", "example.net", "example.org", "example.io", "example.ai"]
+    rows = check_domains(domains)
+
+    # Pretty print
+    for r in rows:
+        print(
+            f"{r['domain']:>15} | "
+            f"Registered: {r['registered']!s:<5} | "
+            f"Registrar: {r['registrar'] or '-':<20} | "
+            f"Created: {r['creation_date'] or '-':<10} | "
+            f"Expires: {r['expiration_date'] or '-':<10} | "
+            f"Status: {r['status']}"
+        )
