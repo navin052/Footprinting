@@ -1,8 +1,13 @@
-# Run search
-search_results = google_search(query)
-# Print results
-if isinstance(search_results, list):
-for title, link in search_results:
-print(f"{title}: {link}")
-else:
-print(search_results)
+query = 'inurl:"admin login"'
+
+try:
+    search_results = google_search(query, max_results=10)
+
+    if search_results:
+        for title, link in search_results:
+            print(f"{title}: {link}")
+    else:
+        print("No results found.")
+
+except Exception as e:
+    print(f"Search failed: {e}")
