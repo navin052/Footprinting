@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+import argparse, json, socket, ssl, re, sys, time
+from datetime import datetime
+import requests
+import dns.resolver
+import whois
+import tldextract
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+
+def safe_str(x):
+    if isinstance(x, list): 
+        return [safe_str(i) for i in x]
+    try:
+        return str(x)
+    except Exception:
+        return repr(x)
+
+def whois_info(domain, timeout=10):
+    try:
+        w = whois.whois(domain, timeout=timeout)
+        def norm_date(v):
+            if isinstance(v, list) and v: v = v[0]
+            if isinstance(v, datetime): return v.isoformat()
+            return safe_str(v)[:32]
+        return {
+            "domain_name": w.domain_name[0] if isinstance(w.domain_name, list) else w.domain_name,
+            "registrar": safe_str(w.registrar),
+            "creation_date": norm_date(w.creation_date),
+            "expiration_date": norm_date(w.expiration_date),
+            "updated_date": norm_date(w.updated_date),
+            "name_servers": safe_str(w.name_servers),
+            "status": safe_str(w.status),
+        }
+    except Exception as e:
+        return {"error": f"whois_failed: {e.__class__.__name__}: {e}"}
+
+def dns_query(name, rtype):
+    try:
+        answers = dns.resolver.resolve(name, rtype, lifetime=5)
+        return [safe_str(r.to_text()) for r in answers]
+    except Exception as e:
+        return {"error": f"dns_{rtype}_failed: {e}"}
+
+def dns_info(domain):
+    out = {}
+    for rtype in ["A","AAAA","CNAME","NS","MX","TXT"]:
+        out[rtype] = dns_query(domain, rtype)
+    # SPF & DMARC
+    spf = []
+    txt = out.get("TXT", [])
+    if isinstance(txt, list):
+        for rec in txt:
+            if "v=spf1" in rec.lower():
+                spf.append(rec)
+    out["SPF"] = spf
+    try:
+        dmarc = dns_query(f"_dmarc.{domain}", "TXT")
+        out["DMARC"] = dmarc
+    except Exception as e:
+        out["DMARC"] = {"error": f"dns_dmarc_failed: {e}"}
+    return out
+
+def crtsh_subdomains(domain, limit=5000, timeout=12):
+    """
+    Passive subdomain discovery via crt.sh (Certificate Transparency).
+    """
+    url = f"https://crt.sh/?q=%25.{domain}&output=json"
+    try:
+        r = requests.get(url, timeout=timeout)
+        r.raise_for_status()
+        data = r.json()
+        subs = set()
+        for row in data[:limit]:
+            nv = row.get("name_value","")
+            for s in nv.splitlines():
+                s = s.strip().lower()
+                if s.endswith(domain.lower()):
+                    subs.add(s)
+        return sorted(subs)
+    except Exception as e:
+        return {"error": f"crtsh_failed: {e}"}
+
+def http_head_and_title(host, use_https=True, timeout=10):
+    schemes = [("https", 443)] if use_https else [("http", 80)]
+    # Try https then http fallback
+    if use_https:
+        schemes.append(("http", 80))
+    for scheme, _ in schemes:
+        url = f"{scheme}://{host}"
+        try:
+            r = requests.get(url, timeout=timeout, allow_redirects=True, headers={"User-Agent":"passive-footprint/1.0"})
+            title = None
+            m = re.search(r"<title[^>]*>(.*?)</title>", r.text[:50000], re.IGNORECASE|re.DOTALL)
+            if m:
+                title = re.sub(r"\s+", " ", m.group(1)).strip()
+            return {
+                "url": url,
+                "status_code": r.status_code,
+                "final_url": r.url,
+                "title": title,
+                "headers": dict(r.headers),
+            }
+        except Exception as e:
+            last_err = f"{scheme}_failed: {e}"
+    return {"error": last_err}
+
+def robots_txt(host, use_https=True, timeout=8):
+    for scheme in (["https","http"] if use_https else ["http"]):
+        url = f"{scheme}://{host}/robots.txt"
+        try:
+            r = requests.get(url, timeout=timeout, headers={"User-Agent":"passive-footprint/1.0"})
+            if r.status_code < 400 and len(r.text) > 0:
+                return {"url": url, "status_code": r.status_code, "content_sample": r.text[:2000]}
+        except Exception as e:
+            pass
+    return {"note": "robots.txt not accessible"}
+
+def tls_cert_info(host, port=443, timeout=8):
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                der = ssock.getpeercert(binary_form=True)
+        cert = x509.load_der_x509_certificate(der, default_backend())
+        def name_list(ext):
+            try:
+                san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+                return [n.value for n in san.value.get_values_for_type(x509.DNSName)]
+            except Exception:
+                return []
+        return {
+            "subject": cert.subject.rfc4514_string(),
+            "issuer": cert.issuer.rfc4514_string(),
+            "not_before": cert.not_valid_before.isoformat(),
+            "not_after": cert.not_valid_after.isoformat(),
+            "san_dns": name_list(x509.SubjectAlternativeName),
+            "serial_number": hex(cert.serial_number),
+            "signature_algorithm": cert.signature_hash_algorithm.name if cert.signature_hash_algorithm else None,
+        }
+    except Exception as e:
+        return {"error": f"tls_failed: {e}"}
+
+def resolve_host(domain):
+    try:
+        return list({ai[4][0] for ai in socket.getaddrinfo(domain, None)})
+    except Exception as e:
+        return {"error": f"resolve_failed: {e}"}
+
+def main():
+    ap = argparse.ArgumentParser(description="Passive OSINT footprinting (no active scanning).")
+    ap.add_argument("domain", help="Target domain (e.g., example.com)")
+    ap.add_argument("--host", help="Web host to probe for headers/cert (default: domain)")
+    ap.add_argument("--no-https", action="store_true", help="Skip HTTPS attempts first")
+    ap.add_argument("--save", help="Write JSON output to file")
+    args = ap.parse_args()
+
+    domain = args.domain.strip().lower()
+    host = (args.host or domain).strip()
+
+    extracted = tldextract.extract(domain)
+    if not extracted.domain or not extracted.suffix:
+        print("Invalid domain.", file=sys.stderr)
+        sys.exit(2)
+
+    print(f"[+] Passive footprint for: {domain}")
+    started = datetime.utcnow().isoformat() + "Z"
+
+    out = {
+        "started_utc": started,
+        "domain": domain,
+        "host": host,
+        "whois": whois_info(domain),
+        "dns": dns_info(domain),
+        "ips": resolve_host(domain),
+        "crtsh_subdomains": crtsh_subdomains(domain),
+        "http": http_head_and_title(host, use_https=not args.no_https),
+        "robots": robots_txt(host, use_https=not args.no_https),
+        "tls_cert": tls_cert_info(host),
+        "notes": "Passive collection only. Use responsibly and with authorization.",
+    }
+
+    if args.save:
+        with open(args.save, "w", encoding="utf-8") as f:
+            json.dump(out, f, indent=2, ensure_ascii=False)
+        print(f"[+] Saved to {args.save}")
+    else:
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
+
+
+#pip install python-whois dnspython requests tldextract cryptography
+# python passive_footprint.py example.com
+# or save to file
+# python passive_footprint.py example.com --save example_footprint.json
+# specify a different host (like www)
+# python passive_footprint.py example.com --host www.example.com
