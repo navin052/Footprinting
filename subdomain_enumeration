@@ -1,0 +1,16 @@
+# Python
+import requests
+import json
+def get_subdomains(domain):
+url = f"https://crt.sh/?q=%25.{domain}&output=json"
+response = requests.get(url)
+if response.status_code == 200:
+data = response.json()
+subdomains = set(entry["name_value"] for entry in data if "name_value" in entry)
+return sorted(subdomains)
+else:
+print("Error fetching data.")
+return []
+domain = "example.com"
+subdomains = get_subdomains(domain)
+print("\n".join(subdomains))
