@@ -1,0 +1,15 @@
+# Python
+import whois
+import socket
+domains = ["example.com", "example.net", "example.org", "example.io", "example.ai"]
+for domain in domains:
+try:
+w = whois.whois(domain)
+# Some WHOIS queries return None, so handle missing data
+registered = bool(w.domain_name) if w.domain_name else False
+print(f"{domain} - Registered: {registered}")
+except whois.parser.PywhoisError: # WHOIS data not found (domain available or restricted)
+print(f"{domain} - Available or WHOIS restricted")
+except socket.timeout: # Handle network timeouts
+print(f"{domain} - WHOIS request timed out")
+except Exception as e: # Catch unex
