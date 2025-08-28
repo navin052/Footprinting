@@ -1,0 +1,12 @@
+<# Ensure PowerShell 7.5 or later is installed and running
+Check version: $PSVersionTable
+Check for upgrades: winget search Microsoft.PowerShell
+Install latest version: winget install --id Microsoft.PowerShell --source
+winget #>
+$subnet = "192.168.1." # Change subnet ID as desired
+1..254 | ForEach-Object -Parallel {
+$ip = "$using:subnet$_"
+if (Test-Connection -ComputerName $ip -Count 1 -Quiet) {
+Write-Output "Host $ip is online"
+}
+} -ThrottleLimit 50
