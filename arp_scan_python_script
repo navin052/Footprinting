@@ -1,0 +1,14 @@
+from scapy.all import ARP, Ether, srp
+
+# Define the subnet
+subnet = "192.168.1.0/24"  # Change this to match your subnet
+
+# Build ARP request packet (broadcast)
+packet = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=subnet)
+
+# Send the packet and receive responses
+answered, _ = srp(packet, timeout=2, verbose=False)
+
+# Print results
+for send, receive in answered:
+    print(f"Host {receive.psrc} - MAC {receive.hwsrc}")
