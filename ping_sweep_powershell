@@ -1,12 +1,17 @@
-<# Ensure PowerShell 7.5 or later is installed and running
-Check version: $PSVersionTable
+<#
+Ensure PowerShell 7.5 or later is installed and running
+Check version: $PSVersionTable.PSVersion
 Check for upgrades: winget search Microsoft.PowerShell
-Install latest version: winget install --id Microsoft.PowerShell --source
-winget #>
-$subnet = "192.168.1." # Change subnet ID as desired
+Install latest version: winget install --id Microsoft.PowerShell --source winget
+#>
+
+# Define the subnet
+$subnet = "192.168.1."   # Change subnet ID as needed
+
+# Run ping scans in parallel across 254 hosts
 1..254 | ForEach-Object -Parallel {
-$ip = "$using:subnet$_"
-if (Test-Connection -ComputerName $ip -Count 1 -Quiet) {
-Write-Output "Host $ip is online"
-}
-} -ThrottleLimit 50
+    $ip = "$using:subnet$_"
+    if (Test-Connection -ComputerName $ip -Count 1 -Quiet) {
+        Write-Output "Host $ip is online"
+    }
+} -ThrottleLimit 50   # Run up to 50 pings in parallel
