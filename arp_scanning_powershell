@@ -1,0 +1,18 @@
+# PowerShell 7.5+
+# Scan a subnet for live hosts and get their MAC addresses from the ARP table
+
+$subnet = "192.168.1."   # Change subnet ID as desired
+
+1..254 | ForEach-Object -Parallel {
+    $ip = "$using:subnet$_"
+
+    # Send one ping to populate ARP table
+    Test-Connection -ComputerName $ip -Count 1 -Quiet | Out-Null
+
+    # Query ARP/neighbor cache
+    $arp = Get-NetNeighbor -AddressFamily IPv4 | Where-Object { $_.IPAddress -eq $ip }
+
+    if ($arp) {
+        Write-Host "Host $ip - MAC: $($arp.LinkLayerAddress)" -ForegroundColor Green
+    }
+} -ThrottleLimit 50
