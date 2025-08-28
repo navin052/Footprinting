@@ -1,0 +1,22 @@
+# PowerShell 7.5+
+# Simple TCP port scanner
+
+$target = "192.168.1.1"   # Change to the target IP or hostname
+$ports  = 22, 80, 443, 8080  # Define ports to scan
+
+$ports | ForEach-Object -Parallel {
+    $port   = $_
+    $client = New-Object System.Net.Sockets.TcpClient
+    
+    try {
+        if ($client.ConnectAsync($using:target, $port).Wait(1000)) {
+            Write-Host "Port $port is OPEN on $using:target" -ForegroundColor Green
+        }
+    }
+    catch {
+        # suppress errors (closed/filtered ports)
+    }
+    finally {
+        $client.Close()
+    }
+} -ThrottleLimit 50
