@@ -1,0 +1,11 @@
+import os
+import platform
+
+subnet = "192.168.1."
+param = "-n" if platform.system().lower() == "windows" else "-c"
+
+for i in range(1, 255):
+    ip = f"{subnet}{i}"
+    response = os.system(f"ping {param} 1 {ip} > nul 2>&1" if platform.system().lower() == "windows" else f"ping {param} 1 {ip} > /dev/null 2>&1")
+    if response == 0:
+        print(f"Host {ip} is online")
